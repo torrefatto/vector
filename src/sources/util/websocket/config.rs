@@ -5,7 +5,7 @@ use snafu::ResultExt;
 
 use crate::{
     codecs::DecodingConfig,
-    common::websocket::{ConnectSnafu, WebSocketConnector, WebSocketError},
+    common::websocket::{ConnectSnafu, WebSocketConnector},
     config::{SourceConfig, SourceContext},
     http::Auth,
     serde::{default_decoding, default_framing_message_based},
@@ -76,6 +76,8 @@ impl Default for WebSocketConfig {
             tls: None,
             auth: None,
             log_namespace: None,
+            ping_interval: None,
+            ping_timeout: None,
         }
     }
 }
@@ -99,11 +101,13 @@ impl SourceConfig for super::config::WebSocketConfig {
     async fn build(&self, cx: SourceContext) -> crate::Result<sources::Source> {
         let tls = MaybeTlsSettings::from_config(&self.tls, false).context(ConnectSnafu)?;
 
-        let connector = WebSocketConnector::new(self.endpoint, tls, self.auth)?;
+        let connector = WebSocketConnector::new(self.endpoint.clone(), tls, self.auth.clone())?;
 
         let source = super::source::WebSocketSource::new(self, connector, cx)?;
 
-        Ok(source.run(cx))
+        let res = source.run(cx.clone());
+
+        Ok(Box::pin(res))
     }
 
     fn outputs(&self, global_log_namespace: LogNamespace) -> Vec<SourceOutput> {
