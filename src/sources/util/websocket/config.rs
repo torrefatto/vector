@@ -25,7 +25,7 @@ pub struct WebSocketConfig {
     ///
     /// The full path must be specified
     #[configurable(metadata(docs::examples = "wss://127.0.0.1:9898/logs"))]
-    pub endpoint: String,
+    pub uri: String,
 
     /// Decoder to use on each received message.
     pub decoding: DeserializerConfig,
@@ -70,7 +70,7 @@ pub struct WebSocketConfig {
 impl Default for WebSocketConfig {
     fn default() -> Self {
         Self {
-            endpoint: "ws://127.0.0.1:9898/logs".to_owned(),
+            uri: "ws://127.0.0.1:9898/logs".to_owned(),
             decoding: default_decoding(),
             framing: default_framing_message_based(),
             tls: None,
@@ -100,14 +100,20 @@ impl WebSocketConfig {
 impl SourceConfig for super::config::WebSocketConfig {
     async fn build(&self, cx: SourceContext) -> crate::Result<sources::Source> {
         let tls = MaybeTlsSettings::from_config(&self.tls, false).context(ConnectSnafu)?;
+        let connector = WebSocketConnector::new(self.uri.clone(), tls, self.auth.clone())?;
 
-        let connector = WebSocketConnector::new(self.endpoint.clone(), tls, self.auth.clone())?;
+        let log_namespace = cx.log_namespace(self.log_namespace);
+        let decoder = self.get_decoding_config(Some(log_namespace)).build();
 
-        let source = super::source::WebSocketSource::new(self, connector, cx)?;
-
-        let res = source.run(cx.clone());
-
-        Ok(Box::pin(res))
+        Ok(Box::pin(super::source::recv_from_websocket(
+            cx,
+            self.clone(),
+            super::source::WebSocketSourceParams {
+                connector,
+                decoder,
+                log_namespace,
+            },
+        )))
     }
 
     fn outputs(&self, global_log_namespace: LogNamespace) -> Vec<SourceOutput> {
